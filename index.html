@@ -226,6 +226,7 @@
 
         let allDone = true;
         dayExs.forEach((ex, exIdx) => {
+          if (!ex.sets) return;
           ex.sets.forEach((_, sIdx) => {
             if (!uData.tracker[dayIdx] || !uData.tracker[dayIdx][exIdx] || !uData.tracker[dayIdx][exIdx][sIdx]) {
               allDone = false;
@@ -338,7 +339,7 @@
 
     // Toggle Dropdown List for Exercise (Prevents closing unexpectedly)
     function toggleExerciseDropdown(dayIdx, exIdx, event) {
-      if(event.target.tagName === 'INPUT') return; // Don't toggle if clicking checkbox directly
+      if(event.target.tagName === 'INPUT') return;
       const el = document.getElementById(`dropdown-${dayIdx}-${exIdx}`);
       const arrow = document.getElementById(`arrow-${dayIdx}-${exIdx}`);
       if (el.classList.contains("hidden")) {
@@ -396,23 +397,25 @@
           let setsHtml = "";
           let doneSetsCount = 0;
 
-          ex.sets.forEach((reps, sIdx) => {
-            totalSets++;
-            const isChecked = (userData.tracker[dayIdx] && userData.tracker[dayIdx][exIdx] && userData.tracker[dayIdx][exIdx][sIdx]) || false;
-            if (isChecked) {
-              completedSets++;
-              doneSetsCount++;
-            }
+          if (ex.sets) {
+            ex.sets.forEach((reps, sIdx) => {
+              totalSets++;
+              const isChecked = (userData.tracker[dayIdx] && userData.tracker[dayIdx][exIdx] && userData.tracker[dayIdx][exIdx][sIdx]) || false;
+              if (isChecked) {
+                completedSets++;
+                doneSetsCount++;
+              }
 
-            setsHtml += `
-              <div class="flex items-center justify-between bg-slate-900/80 px-3 py-2 rounded border border-slate-800 text-xs">
-                <span class="text-slate-300 font-medium">الجلسة ${sIdx + 1}: <strong class="text-emerald-400">${reps}</strong></span>
-                <input type="checkbox" onclick="toggleSetCompletion(${dayIdx}, ${exIdx}, ${sIdx}, event)" ${isChecked ? 'checked' : ''} class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
-              </div>
-            `;
-          });
+              setsHtml += `
+                <div class="flex items-center justify-between bg-slate-900/80 px-3 py-2 rounded border border-slate-800 text-xs">
+                  <span class="text-slate-300 font-medium">الجلسة ${sIdx + 1}: <strong class="text-emerald-400">${reps}</strong></span>
+                  <input type="checkbox" onclick="toggleSetCompletion(${dayIdx}, ${exIdx}, ${sIdx}, event)" ${isChecked ? 'checked' : ''} class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
+                </div>
+              `;
+            });
+          }
 
-          const isAllDone = doneSetsCount === ex.sets.length && ex.sets.length > 0;
+          const isAllDone = ex.sets && doneSetsCount === ex.sets.length && ex.sets.length > 0;
 
           exercisesHtml += `
             <div class="bg-slate-900/60 rounded-lg border border-slate-800 overflow-hidden">
@@ -423,7 +426,7 @@
                   <span class="text-sm font-semibold text-slate-100 ${isAllDone ? 'line-through text-slate-500' : ''}">${ex.name}</span>
                 </div>
                 <span class="text-[11px] font-bold px-2 py-0.5 rounded ${isAllDone ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}">
-                  ${doneSetsCount} / ${ex.sets.length} جلسات
+                  ${doneSetsCount} / ${ex.sets ? ex.sets.length : 0} جلسات
                 </span>
               </div>
               <div id="dropdown-${dayIdx}-${exIdx}" class="p-3 border-t border-slate-800/80 space-y-2 bg-slate-950/40 hidden">
@@ -453,29 +456,41 @@
       }
     }
 
-    // Leaderboard Split into Two Sections (Streak & Progress)
+    // Leaderboard Split into Two Sections (Streak & Progress) with robust listener
     function listenLeaderboard() {
       db.ref("users").on("value", (snap) => {
         const users = snap.val();
         const streakListEl = document.getElementById("streak-leaderboard-list");
         const progressListEl = document.getElementById("progress-leaderboard-list");
+        
+        if (!streakListEl || !progressListEl) return;
+        
         streakListEl.innerHTML = "";
         progressListEl.innerHTML = "";
 
-        if (!users) return;
+        if (!users) {
+          streakListEl.innerHTML = `<p class="text-xs text-slate-500">لا يوجد مسجلين بعد</p>`;
+          progressListEl.innerHTML = `<p class="text-xs text-slate-500">لا يوجد مسجلين بعد</p>`;
+          return;
+        }
 
         let userList = [];
 
         Object.keys(users).forEach(uName => {
-          const uData = users[uName].data;
-          if (!uData || !uData.tracker) return;
+          const userObj = users[uName];
+          const uData = userObj.data;
+          if (!uData || !uData.tracker || !uData.schedule) return;
 
           let total = 0, done = 0;
           uData.schedule.forEach((d, dayIdx) => {
+            if (!d.exercises) return;
             d.exercises.forEach((ex, exIdx) => {
+              if (!ex.sets) return;
               ex.sets.forEach((_, sIdx) => {
                 total++;
-                if (uData.tracker[dayIdx] && uData.tracker[dayIdx][exIdx] && uData.tracker[dayIdx][exIdx][sIdx]) done++;
+                if (uData.tracker[dayIdx] && uData.tracker[dayIdx][exIdx] && uData.tracker[dayIdx][exIdx][sIdx]) {
+                  done++;
+                }
               });
             });
           });
@@ -486,7 +501,13 @@
           userList.push({ name: uName, streak: streak, pct: pct });
         });
 
-        // 1. Render Streak Section (Sorted by Streak)
+        if (userList.length === 0) {
+          streakListEl.innerHTML = `<p class="text-xs text-slate-500">لا توجد بيانات متاحة</p>`;
+          progressListEl.innerHTML = `<p class="text-xs text-slate-500">لا توجد بيانات متاحة</p>`;
+          return;
+        }
+
+        // 1. Render Streak Section (Sorted by Streak descending)
         let streakSorted = [...userList].sort((a, b) => b.streak - a.streak);
         streakSorted.forEach((u, index) => {
           const item = document.createElement("div");
@@ -504,7 +525,7 @@
           streakListEl.appendChild(item);
         });
 
-        // 2. Render Progress Section (Sorted by Percentage)
+        // 2. Render Progress Section (Sorted by Percentage descending)
         let progressSorted = [...userList].sort((a, b) => b.pct - a.pct);
         progressSorted.forEach((u, index) => {
           const item = document.createElement("div");
@@ -529,9 +550,11 @@
           if (!userData.tracker[dayIdx]) userData.tracker[dayIdx] = {};
           d.exercises.forEach((ex, exIdx) => {
             if (!userData.tracker[dayIdx][exIdx]) userData.tracker[dayIdx][exIdx] = {};
-            ex.sets.forEach((_, sIdx) => {
-              userData.tracker[dayIdx][exIdx][sIdx] = false;
-            });
+            if (ex.sets) {
+              ex.sets.forEach((_, sIdx) => {
+                userData.tracker[dayIdx][exIdx][sIdx] = false;
+              });
+            }
           });
         });
         userData.lastUpdatedDate = new Date().toISOString().split('T')[0];
@@ -548,7 +571,7 @@
         const div = document.createElement("div");
         div.className = "bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-2";
         
-        const exsFormatted = d.exercises.map(ex => `${ex.name} [${ex.sets.join(', ')}]`).join(' ، ');
+        const exsFormatted = d.exercises.map(ex => `${ex.name} [${ex.sets ? ex.sets.join(', ') : ''}]`).join(' ، ');
 
         div.innerHTML = `
           <label class="block text-xs font-bold text-emerald-400">${d.day}</label>
