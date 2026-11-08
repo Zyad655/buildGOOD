@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام متابعة التمارين السحابي</title>
+  <title>نظام متابعة التمارين السحابي مع الاستريك</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Firebase App & Realtime Database SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
@@ -33,7 +33,7 @@
     <div class="text-center mb-6">
       <i class="fa-solid fa-dumbbell text-4xl text-emerald-400 mb-2"></i>
       <h1 class="text-2xl font-bold">تسجيل الدخول / حساب جديد</h1>
-      <p class="text-slate-400 text-sm mt-1">سجل يدوياً ليتم حفظ تمارينك سحابياً</p>
+      <p class="text-slate-400 text-sm mt-1">سجل يدوياً ليتم حفظ تمارينك واستريكك سحابياً</p>
     </div>
 
     <div class="space-y-4">
@@ -62,7 +62,12 @@
           U
         </div>
         <div>
-          <h2 class="font-bold text-lg" id="welcome-username">مرحباً</h2>
+          <h2 class="font-bold text-lg flex items-center gap-2">
+            <span id="welcome-username">مرحباً</span>
+            <span id="user-streak-badge" class="bg-orange-500/20 text-orange-400 text-xs px-2 py-0.5 rounded-full border border-orange-500/30 flex items-center gap-1 hidden">
+              <i class="fa-solid fa-fire text-orange-500"></i> <span id="user-streak-count">0</span> يوم
+            </span>
+          </h2>
           <span class="text-xs text-emerald-400 font-semibold"><i class="fa-solid fa-cloud"></i> متصل بالسحابة</span>
         </div>
       </div>
@@ -74,7 +79,7 @@
     <!-- Navigation Tabs -->
     <div class="flex gap-2 border-b border-slate-700 pb-2">
       <button onclick="switchTab('tracker')" id="tab-tracker-btn" class="px-4 py-2 rounded-lg font-bold bg-emerald-600 text-white">جدول التمارين</button>
-      <button onclick="switchTab('leaderboard')" id="tab-leaderboard-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">قائمة المتصدرين</button>
+      <button onclick="switchTab('leaderboard')" id="tab-leaderboard-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">ترتيب الاستريك 🔥</button>
       <button onclick="switchTab('editor')" id="tab-editor-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">تعديل التمارين</button>
     </div>
 
@@ -91,22 +96,27 @@
       </div>
 
       <div id="days-container" class="space-y-4">
-        <!-- Days will be rendered dynamically -->
+        <!-- Days rendered dynamically -->
       </div>
     </div>
 
     <!-- TAB 2: LEADERBOARD -->
     <div id="tab-leaderboard" class="glass p-6 rounded-xl hidden space-y-4">
-      <h3 class="text-xl font-bold mb-4"><i class="fa-solid fa-trophy text-yellow-400"></i> تقدم المشاركين</h3>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-xl font-bold flex items-center gap-2">
+          <i class="fa-solid fa-trophy text-yellow-400"></i> قائمة المتصدرين بالاستريك
+        </h3>
+        <span class="text-xs text-slate-400">يبدأ الاستريك من ثاني يوم متتالي 🔥</span>
+      </div>
       <div id="leaderboard-list" class="space-y-3">
-        <!-- Users progress rendered here -->
+        <!-- Ranked Users list -->
       </div>
     </div>
 
     <!-- TAB 3: EDITOR -->
     <div id="tab-editor" class="glass p-6 rounded-xl hidden space-y-4">
       <h3 class="text-xl font-bold mb-2">إدارة التمارين الأسبوعية</h3>
-      <p class="text-xs text-slate-400 mb-4">أضف أو اعد ترتيب التمارين في جدولك الخاص</p>
+      <p class="text-xs text-slate-400 mb-4">أضف أو أعد ترتيب التمارين في جدولك الخاص</p>
       <div id="editor-container" class="space-y-4">
         <!-- Exercise Editor rendered here -->
       </div>
@@ -147,6 +157,35 @@
     let currentUser = null;
     let userData = null;
 
+    // Calculate Streak (Starts from 2 consecutive completed days)
+    function calculateStreak(uData) {
+      if (!uData || !uData.schedule || !uData.tracker) return 0;
+      
+      let consecutiveDays = 0;
+      for (let dayIdx = 0; dayIdx < uData.schedule.length; dayIdx++) {
+        const dayExs = uData.schedule[dayIdx].exercises;
+        if (!dayExs || dayExs.length === 0) continue;
+
+        let allDone = true;
+        dayExs.forEach((_, exIdx) => {
+          if (!uData.tracker[dayIdx] || uData.tracker[dayIdx][exIdx] !== 1) {
+            allDone = false;
+          }
+        });
+
+        if (allDone) {
+          consecutiveDays++;
+        } else {
+          // Break streak if an uncompleted day is reached after starting
+          if (consecutiveDays < 2) consecutiveDays = 0;
+          else break;
+        }
+      }
+
+      // Streak condition: Starts appearing from 2nd consecutive day
+      return consecutiveDays >= 2 ? consecutiveDays : 0;
+    }
+
     // Authentication Logic
     function handleAuth() {
       const usernameInput = document.getElementById("auth-username").value.trim();
@@ -163,7 +202,6 @@
       userRef.once("value", (snapshot) => {
         const val = snapshot.val();
         if (val) {
-          // User exists, verify password
           if (val.password === passwordInput) {
             currentUser = usernameInput;
             userData = val.data || createDefaultUserData();
@@ -173,7 +211,6 @@
             errEl.classList.remove("hidden");
           }
         } else {
-          // Register new user
           currentUser = usernameInput;
           userData = createDefaultUserData();
           userRef.set({
@@ -190,7 +227,7 @@
       defaultSchedule.forEach((d, dIdx) => {
         tracker[dIdx] = {};
         d.exercises.forEach((ex, exIdx) => {
-          tracker[dIdx][exIdx] = 0; // 0: unstarted, 1: done, 2: failed
+          tracker[dIdx][exIdx] = 0;
         });
       });
       return {
@@ -205,7 +242,6 @@
       document.getElementById("welcome-username").innerText = currentUser;
       document.getElementById("user-avatar").innerText = currentUser.charAt(0).toUpperCase();
 
-      // Listen for real-time changes
       db.ref("users/" + currentUser + "/data").on("value", (snap) => {
         if(snap.val()) {
           userData = snap.val();
@@ -243,7 +279,6 @@
       let next = (curr + 1) % 3;
       userData.tracker[dayIdx][exIdx] = next;
 
-      // Save to cloud
       db.ref("users/" + currentUser + "/data").set(userData);
     }
 
@@ -287,9 +322,19 @@
 
       const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
       document.getElementById("completion-rate").innerText = `${percentage}%`;
+
+      // Update User Streak Badge in Header
+      const streak = calculateStreak(userData);
+      const badgeEl = document.getElementById("user-streak-badge");
+      if (streak >= 2) {
+        document.getElementById("user-streak-count").innerText = streak;
+        badgeEl.classList.remove("hidden");
+      } else {
+        badgeEl.classList.add("hidden");
+      }
     }
 
-    // Leaderboard
+    // Leaderboard Sorted by Streak then Progress
     function listenLeaderboard() {
       db.ref("users").on("value", (snap) => {
         const users = snap.val();
@@ -297,6 +342,8 @@
         listEl.innerHTML = "";
 
         if (!users) return;
+
+        let userList = [];
 
         Object.keys(users).forEach(uName => {
           const uData = users[uName].data;
@@ -311,19 +358,36 @@
           });
 
           const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          const streak = calculateStreak(uData);
+
+          userList.push({ name: uName, streak: streak, pct: pct });
+        });
+
+        // Sort by streak (descending), then by percentage (descending)
+        userList.sort((a, b) => b.streak - a.streak || b.pct - a.pct);
+
+        userList.forEach((u, index) => {
+          let rankBadge = `<span class="w-6 text-center font-bold text-slate-500">${index + 1}</span>`;
+          if (index === 0) rankBadge = `<span class="w-6 text-center text-lg">🥇</span>`;
+          else if (index === 1) rankBadge = `<span class="w-6 text-center text-lg">🥈</span>`;
+          else if (index === 2) rankBadge = `<span class="w-6 text-center text-lg">🥉</span>`;
 
           const item = document.createElement("div");
           item.className = "flex items-center justify-between bg-slate-900/80 p-3 rounded-lg border border-slate-800";
           item.innerHTML = `
             <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs">${uName.charAt(0).toUpperCase()}</div>
-              <span class="font-bold text-sm">${uName}</span>
-            </div>
-            <div class="flex items-center gap-3">
-              <div class="w-32 bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                <div class="bg-emerald-500 h-2.5 rounded-full" style="width: ${pct}%"></div>
+              ${rankBadge}
+              <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs">${u.name.charAt(0).toUpperCase()}</div>
+              <div>
+                <span class="font-bold text-sm block">${u.name}</span>
+                <span class="text-[10px] text-slate-400">الإنجاز الأسبوعي: ${u.pct}%</span>
               </div>
-              <span class="text-xs font-bold text-emerald-400 w-8 text-left">${pct}%</span>
+            </div>
+            <div class="flex items-center gap-2">
+              ${u.streak >= 2 
+                ? `<span class="bg-orange-500/20 text-orange-400 text-xs px-2.5 py-1 rounded-full border border-orange-500/30 font-bold flex items-center gap-1"><i class="fa-solid fa-fire text-orange-500"></i> ${u.streak} أيام</span>` 
+                : `<span class="text-xs text-slate-500">لا يوجد استريك</span>`
+              }
             </div>
           `;
           listEl.appendChild(item);
@@ -333,7 +397,7 @@
 
     // Reset Progress
     function resetWeekProgress() {
-      if (confirm("هل تريد إعادة ضبط تقدم الأسبوع بالكامل؟")) {
+      if (confirm("هل تريد إعادة ضبط تقدم الأسبوع بالكامل؟ (سيتم إعادة ضبط الاستريك)")) {
         userData.schedule.forEach((d, dayIdx) => {
           if (!userData.tracker[dayIdx]) userData.tracker[dayIdx] = {};
           d.exercises.forEach((ex, exIdx) => {
