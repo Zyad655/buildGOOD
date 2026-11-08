@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام متابعة التمارين السحابي مع الاستريك والجلسات</title>
+  <title>نظام متابعة التمارين السحابي المطور</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Firebase App & Realtime Database SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
@@ -49,7 +49,7 @@
     </div>
   </div>
 
-  <!-- Main App Screen (Hidden initially) -->
+  <!-- Main App Screen -->
   <div id="app-screen" class="max-w-4xl mx-auto space-y-6 hidden">
     
     <!-- Top Bar -->
@@ -65,7 +65,7 @@
               <i class="fa-solid fa-fire text-orange-500"></i> <span id="user-streak-count">0</span> يوم
             </span>
           </h2>
-          <span class="text-xs text-emerald-400 font-semibold"><i class="fa-solid fa-cloud"></i> متصل بالسحابة</span>
+          <span class="text-xs text-emerald-400 font-semibold" id="current-date-display"><i class="fa-solid fa-calendar"></i> التاريخ: --</span>
         </div>
       </div>
       <button onclick="logout()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm border border-slate-700">
@@ -76,7 +76,7 @@
     <!-- Navigation Tabs -->
     <div class="flex gap-2 border-b border-slate-700 pb-2">
       <button onclick="switchTab('tracker')" id="tab-tracker-btn" class="px-4 py-2 rounded-lg font-bold bg-emerald-600 text-white">جدول التمارين والجلسات</button>
-      <button onclick="switchTab('leaderboard')" id="tab-leaderboard-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">ترتيب الاستريك 🔥</button>
+      <button onclick="switchTab('leaderboard')" id="tab-leaderboard-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">قائمة المتصدرين 🔥</button>
       <button onclick="switchTab('editor')" id="tab-editor-btn" class="px-4 py-2 rounded-lg font-bold text-slate-400 hover:bg-slate-800">تعديل التمارين</button>
     </div>
 
@@ -98,16 +98,28 @@
     </div>
 
     <!-- TAB 2: LEADERBOARD -->
-    <div id="tab-leaderboard" class="glass p-6 rounded-xl hidden space-y-4">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-xl font-bold flex items-center gap-2">
-          <i class="fa-solid fa-trophy text-yellow-400"></i> قائمة المتصدرين بالاستريك
+    <div id="tab-leaderboard" class="glass p-6 rounded-xl hidden space-y-6">
+      
+      <!-- Section 1: Streak Leaderboard -->
+      <div class="space-y-3">
+        <h3 class="text-lg font-bold flex items-center gap-2 text-orange-400 border-b border-slate-800 pb-2">
+          <i class="fa-solid fa-fire"></i> المتصدرون حسب الاستريك (الأيام المتتالية)
         </h3>
-        <span class="text-xs text-slate-400">يبدأ الاستريك من ثاني يوم متتالي 🔥</span>
+        <div id="streak-leaderboard-list" class="space-y-2">
+          <!-- Streak users rendered here -->
+        </div>
       </div>
-      <div id="leaderboard-list" class="space-y-3">
-        <!-- Ranked Users list -->
+
+      <!-- Section 2: Progress Percentage Leaderboard -->
+      <div class="space-y-3 pt-4">
+        <h3 class="text-lg font-bold flex items-center gap-2 text-emerald-400 border-b border-slate-800 pb-2">
+          <i class="fa-solid fa-trophy"></i> المتصدرون حسب نسبة الإنجاز الأسبوعي
+        </h3>
+        <div id="progress-leaderboard-list" class="space-y-2">
+          <!-- Progress users rendered here -->
+        </div>
       </div>
+
     </div>
 
     <!-- TAB 3: EDITOR -->
@@ -140,7 +152,7 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Default Days and Workouts Template with sets and reps
+    // Default Days and Workouts Template
     const defaultSchedule = [
       { 
         day: "السبت", 
@@ -195,7 +207,15 @@
     let currentUser = null;
     let userData = null;
 
-    // Calculate Streak (Starts from 2 consecutive completed days)
+    // Display Current Date in Arabic
+    function updateCurrentDate() {
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      const todayStr = new Date().toLocaleDateString('ar-SA', options);
+      const dateEl = document.getElementById("current-date-display");
+      if(dateEl) dateEl.innerHTML = `<i class="fa-solid fa-calendar"></i> ${todayStr}`;
+    }
+
+    // Calculate Streak
     function calculateStreak(uData) {
       if (!uData || !uData.schedule || !uData.tracker) return 0;
       
@@ -273,7 +293,8 @@
       });
       return {
         schedule: defaultSchedule,
-        tracker: tracker
+        tracker: tracker,
+        lastUpdatedDate: new Date().toISOString().split('T')[0]
       };
     }
 
@@ -282,6 +303,8 @@
       document.getElementById("app-screen").classList.remove("hidden");
       document.getElementById("welcome-username").innerText = currentUser;
       document.getElementById("user-avatar").innerText = currentUser.charAt(0).toUpperCase();
+
+      updateCurrentDate();
 
       db.ref("users/" + currentUser + "/data").on("value", (snap) => {
         if(snap.val()) {
@@ -313,8 +336,9 @@
       document.getElementById(`tab-${tabName}-btn`).className = "px-4 py-2 rounded-lg font-bold bg-emerald-600 text-white";
     }
 
-    // Toggle Dropdown List for Exercise
-    function toggleExerciseDropdown(dayIdx, exIdx) {
+    // Toggle Dropdown List for Exercise (Prevents closing unexpectedly)
+    function toggleExerciseDropdown(dayIdx, exIdx, event) {
+      if(event.target.tagName === 'INPUT') return; // Don't toggle if clicking checkbox directly
       const el = document.getElementById(`dropdown-${dayIdx}-${exIdx}`);
       const arrow = document.getElementById(`arrow-${dayIdx}-${exIdx}`);
       if (el.classList.contains("hidden")) {
@@ -327,13 +351,31 @@
     }
 
     // Toggle Single Set Completion Checkbox
-    function toggleSetCompletion(dayIdx, exIdx, sIdx) {
+    function toggleSetCompletion(dayIdx, exIdx, sIdx, event) {
+      event.stopPropagation();
       if (!userData.tracker[dayIdx]) userData.tracker[dayIdx] = {};
       if (!userData.tracker[dayIdx][exIdx]) userData.tracker[dayIdx][exIdx] = {};
       
       const currentVal = userData.tracker[dayIdx][exIdx][sIdx] || false;
       userData.tracker[dayIdx][exIdx][sIdx] = !currentVal;
+      userData.lastUpdatedDate = new Date().toISOString().split('T')[0];
 
+      db.ref("users/" + currentUser + "/data").set(userData);
+    }
+
+    // Toggle All Sets for an Exercise via Main Checkbox
+    function toggleAllSetsForExercise(dayIdx, exIdx, event) {
+      event.stopPropagation();
+      const isChecked = event.target.checked;
+
+      if (!userData.tracker[dayIdx]) userData.tracker[dayIdx] = {};
+      if (!userData.tracker[dayIdx][exIdx]) userData.tracker[dayIdx][exIdx] = {};
+
+      userData.schedule[dayIdx].exercises[exIdx].sets.forEach((_, sIdx) => {
+        userData.tracker[dayIdx][exIdx][sIdx] = isChecked;
+      });
+
+      userData.lastUpdatedDate = new Date().toISOString().split('T')[0];
       db.ref("users/" + currentUser + "/data").set(userData);
     }
 
@@ -365,7 +407,7 @@
             setsHtml += `
               <div class="flex items-center justify-between bg-slate-900/80 px-3 py-2 rounded border border-slate-800 text-xs">
                 <span class="text-slate-300 font-medium">الجلسة ${sIdx + 1}: <strong class="text-emerald-400">${reps}</strong></span>
-                <input type="checkbox" onchange="toggleSetCompletion(${dayIdx}, ${exIdx}, ${sIdx})" ${isChecked ? 'checked' : ''} class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
+                <input type="checkbox" onclick="toggleSetCompletion(${dayIdx}, ${exIdx}, ${sIdx}, event)" ${isChecked ? 'checked' : ''} class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
               </div>
             `;
           });
@@ -374,8 +416,9 @@
 
           exercisesHtml += `
             <div class="bg-slate-900/60 rounded-lg border border-slate-800 overflow-hidden">
-              <div onclick="toggleExerciseDropdown(${dayIdx}, ${exIdx})" class="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition-colors">
-                <div class="flex items-center gap-2">
+              <div onclick="toggleExerciseDropdown(${dayIdx}, ${exIdx}, event)" class="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <input type="checkbox" onclick="toggleAllSetsForExercise(${dayIdx}, ${exIdx}, event)" ${isAllDone ? 'checked' : ''} title="تحديد الكل" class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
                   <i class="fa-solid fa-chevron-down text-xs text-slate-400 transition-transform" id="arrow-${dayIdx}-${exIdx}"></i>
                   <span class="text-sm font-semibold text-slate-100 ${isAllDone ? 'line-through text-slate-500' : ''}">${ex.name}</span>
                 </div>
@@ -400,7 +443,6 @@
       const percentage = totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0;
       document.getElementById("completion-rate").innerText = `${percentage}%`;
 
-      // Update User Streak Badge in Header
       const streak = calculateStreak(userData);
       const badgeEl = document.getElementById("user-streak-badge");
       if (streak >= 2) {
@@ -411,12 +453,14 @@
       }
     }
 
-    // Leaderboard Sorted by Streak then Progress
+    // Leaderboard Split into Two Sections (Streak & Progress)
     function listenLeaderboard() {
       db.ref("users").on("value", (snap) => {
         const users = snap.val();
-        const listEl = document.getElementById("leaderboard-list");
-        listEl.innerHTML = "";
+        const streakListEl = document.getElementById("streak-leaderboard-list");
+        const progressListEl = document.getElementById("progress-leaderboard-list");
+        streakListEl.innerHTML = "";
+        progressListEl.innerHTML = "";
 
         if (!users) return;
 
@@ -442,41 +486,45 @@
           userList.push({ name: uName, streak: streak, pct: pct });
         });
 
-        // Sort by streak (descending), then by percentage (descending)
-        userList.sort((a, b) => b.streak - a.streak || b.pct - a.pct);
-
-        userList.forEach((u, index) => {
-          let rankBadge = `<span class="w-6 text-center font-bold text-slate-500">${index + 1}</span>`;
-          if (index === 0) rankBadge = `<span class="w-6 text-center text-lg">🥇</span>`;
-          else if (index === 1) rankBadge = `<span class="w-6 text-center text-lg">🥈</span>`;
-          else if (index === 2) rankBadge = `<span class="w-6 text-center text-lg">🥉</span>`;
-
+        // 1. Render Streak Section (Sorted by Streak)
+        let streakSorted = [...userList].sort((a, b) => b.streak - a.streak);
+        streakSorted.forEach((u, index) => {
           const item = document.createElement("div");
           item.className = "flex items-center justify-between bg-slate-900/80 p-3 rounded-lg border border-slate-800";
           item.innerHTML = `
             <div class="flex items-center gap-3">
-              ${rankBadge}
+              <span class="w-6 text-center font-bold text-slate-400">#${index + 1}</span>
               <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs">${u.name.charAt(0).toUpperCase()}</div>
-              <div>
-                <span class="font-bold text-sm block">${u.name}</span>
-                <span class="text-[10px] text-slate-400">الإنجاز الأسبوعي: ${u.pct}%</span>
-              </div>
+              <span class="font-bold text-sm">${u.name}</span>
             </div>
-            <div class="flex items-center gap-2">
-              ${u.streak >= 2 
-                ? `<span class="bg-orange-500/20 text-orange-400 text-xs px-2.5 py-1 rounded-full border border-orange-500/30 font-bold flex items-center gap-1"><i class="fa-solid fa-fire text-orange-500"></i> ${u.streak} أيام</span>` 
-                : `<span class="text-xs text-slate-500">لا يوجد استريك</span>`
-              }
-            </div>
+            <span class="bg-orange-500/20 text-orange-400 text-xs px-3 py-1 rounded-full border border-orange-500/30 font-bold flex items-center gap-1">
+              <i class="fa-solid fa-fire text-orange-500"></i> ${u.streak} أيام
+            </span>
           `;
-          listEl.appendChild(item);
+          streakListEl.appendChild(item);
+        });
+
+        // 2. Render Progress Section (Sorted by Percentage)
+        let progressSorted = [...userList].sort((a, b) => b.pct - a.pct);
+        progressSorted.forEach((u, index) => {
+          const item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-slate-900/80 p-3 rounded-lg border border-slate-800";
+          item.innerHTML = `
+            <div class="flex items-center gap-3">
+              <span class="w-6 text-center font-bold text-slate-400">#${index + 1}</span>
+              <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs">${u.name.charAt(0).toUpperCase()}</div>
+              <span class="font-bold text-sm">${u.name}</span>
+            </div>
+            <span class="text-xs font-bold text-emerald-400">${u.pct}%</span>
+          `;
+          progressListEl.appendChild(item);
         });
       });
     }
 
     // Reset Progress
     function resetWeekProgress() {
-      if (confirm("هل تريد إعادة ضبط تقدم الأسبوع بالكامل؟ (سيتم إعادة ضبط الاستريك)")) {
+      if (confirm("هل تريد إعادة ضبط تقدم الأسبوع بالكامل؟")) {
         userData.schedule.forEach((d, dayIdx) => {
           if (!userData.tracker[dayIdx]) userData.tracker[dayIdx] = {};
           d.exercises.forEach((ex, exIdx) => {
@@ -486,6 +534,7 @@
             });
           });
         });
+        userData.lastUpdatedDate = new Date().toISOString().split('T')[0];
         db.ref("users/" + currentUser + "/data").set(userData);
       }
     }
@@ -504,7 +553,6 @@
         div.innerHTML = `
           <label class="block text-xs font-bold text-emerald-400">${d.day}</label>
           <input type="text" id="edit-day-${dayIdx}" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white" value="${exsFormatted}">
-          <span class="text-[10px] text-slate-500">اكتب التمرين والعدات داخل أقواس مربعة مثل: بوش اب [12, 10, 8] وافصل بينهم بفاصلة (،)</span>
         `;
         container.appendChild(div);
       });
@@ -526,6 +574,8 @@
           }
         });
       });
+
+      userData.lastUpdatedDate = new Date().toISOString().split('T')[0];
       db.ref("users/" + currentUser + "/data").set(userData);
       alert("تم حفظ التعديلات سحابياً!");
       switchTab('tracker');
